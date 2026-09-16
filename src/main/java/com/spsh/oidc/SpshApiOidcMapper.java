@@ -128,10 +128,8 @@ public class SpshApiOidcMapper extends AbstractOIDCProtocolMapper implements OID
         String extractJsonPath = mappingModel.getConfig().get(EXTRACT_JSON_PATH);
         boolean ignoreMissingPath = Boolean.parseBoolean(mappingModel.getConfig().getOrDefault(IGNORE_MISSING_PATH, "false"));
         boolean includeEmailAddress = Boolean.parseBoolean(mappingModel.getConfig().getOrDefault(INCLUDE_EMAIL_ADDRESS, "false"));
-        String configuredKeycloakClientId = mappingModel.getConfig().get(KEYCLOAK_CLIENT_ID);
-        String defaultKeycloakClientId = clientSessionCtx.getClientSession().getClient().getClientId();
-        String keycloakClientId = (configuredKeycloakClientId == null || configuredKeycloakClientId.isEmpty())
-            ? defaultKeycloakClientId : configuredKeycloakClientId;
+        String keycloakClientId = resolveKeycloakClientId(
+            mappingModel.getConfig().get(KEYCLOAK_CLIENT_ID), clientSessionCtx.getClientSession().getClient().getClientId());
         String userSub = userSession.getUser().getId();
 
         LOGGER.info(String.format("Setting claims via custom SpshApiOidcMapper for userSub: %s", userSub));
@@ -172,5 +170,10 @@ public class SpshApiOidcMapper extends AbstractOIDCProtocolMapper implements OID
             e.printStackTrace();
         }
 
+    }
+
+    private static String resolveKeycloakClientId(String configuredKeycloakClientId, String defaultKeycloakClientId) {
+        return (configuredKeycloakClientId == null || configuredKeycloakClientId.isEmpty())
+            ? defaultKeycloakClientId : configuredKeycloakClientId;
     }
 }

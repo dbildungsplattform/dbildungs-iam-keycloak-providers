@@ -104,10 +104,8 @@ public class SpshApiSamlMapper extends AbstractSAMLProtocolMapper implements SAM
         String fetchUrl = mappingModel.getConfig().get(FETCH_URL);
         String extractJsonPath = mappingModel.getConfig().get(EXTRACT_JSON_PATH);
         boolean includeEmailAddress = Boolean.parseBoolean(mappingModel.getConfig().getOrDefault(INCLUDE_EMAIL_ADDRESS, "false"));
-        String configuredKeycloakClientId = mappingModel.getConfig().get(KEYCLOAK_CLIENT_ID);
-        String defaultKeycloakClientId = clientSession.getClient().getClientId();
-        String keycloakClientId = (configuredKeycloakClientId == null || configuredKeycloakClientId.isEmpty())
-            ? defaultKeycloakClientId : configuredKeycloakClientId;
+        String keycloakClientId = resolveKeycloakClientId(
+            mappingModel.getConfig().get(KEYCLOAK_CLIENT_ID), clientSession.getClient().getClientId());
         String userSub = userSession.getUser().getId();
 
         LOGGER.info(String.format("Setting SAML attribute via custom SpshApiSamlMapper for userSub: %s", userSub));
@@ -142,5 +140,10 @@ public class SpshApiSamlMapper extends AbstractSAMLProtocolMapper implements SAM
         } catch (Exception e) {
             LOGGER.error("Error fetching or processing API data", e);
         }
+    }
+
+    private static String resolveKeycloakClientId(String configuredKeycloakClientId, String defaultKeycloakClientId) {
+        return (configuredKeycloakClientId == null || configuredKeycloakClientId.isEmpty())
+            ? defaultKeycloakClientId : configuredKeycloakClientId;
     }
 }
