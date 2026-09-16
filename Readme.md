@@ -36,5 +36,5 @@ To test local changes to the providers in a Keycloak instance started via `dbild
 
 The admin console is then available at [http://localhost:8080/admin/master/console/](http://localhost:8080/admin/master/console/) (login `admin`/`admin`).
 
-To verify the providers, you can use the `vidis-test` client (Keycloak client "VIDIS-Testumgebung") — it is already preconfigured with the 6 mappers (`rolle`, `schulkennung`, `vorname`, `email`, `nachname`, `uid`) of type `spsh-custom-oidc-api-mapper` and already uses the V2 solution (`keycloakClient`/`includeEmailAddress`), see `dbildungs-iam-server/config/dev-realm-spsh.json`.
+To verify the providers, you can use the `vidis-test` client (Keycloak client "VIDIS-Testumgebung") — it is already preconfigured with the 6 mappers (`rolle`, `schulkennung`, `vorname`, `email`, `nachname`, `uid`) of type `spsh-custom-oidc-api-mapper` and already uses the V2 solution (`keycloakClientId`/`includeEmailAddress`), see `dbildungs-iam-server/config/dev-realm-spsh.json`.
 

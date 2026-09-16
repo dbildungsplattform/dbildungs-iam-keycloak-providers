@@ -29,7 +29,7 @@ public class SpshApiOidcMapper extends AbstractOIDCProtocolMapper implements OID
     public static final String FETCH_URL = "fetchUrl";
     public static final String EXTRACT_JSON_PATH = "extractJsonPath";
     public static final String IGNORE_MISSING_PATH = "ignoreMissingPath";
-    public static final String KEYCLOAK_CLIENT = "keycloakClient";
+    public static final String KEYCLOAK_CLIENT_ID = "keycloakClientId";
     public static final String INCLUDE_EMAIL_ADDRESS = "includeEmailAddress";
     private static final List<ProviderConfigProperty> configProperties = new ArrayList<>();
     private static final Logger LOGGER = Logger.getLogger(SpshApiOidcMapper.class);
@@ -66,12 +66,12 @@ public class SpshApiOidcMapper extends AbstractOIDCProtocolMapper implements OID
         ignoreMissingPathProperty.setHelpText("If JSON Path cannot be found in response received from Backend, do not throw an error, just ignore it.");
         configProperties.add(ignoreMissingPathProperty);
 
-        ProviderConfigProperty keycloakClientProperty = new ProviderConfigProperty();
-        keycloakClientProperty.setName(KEYCLOAK_CLIENT);
-        keycloakClientProperty.setLabel("SPSH Keycloak Client");
-        keycloakClientProperty.setType(ProviderConfigProperty.STRING_TYPE);
-        keycloakClientProperty.setHelpText("The keycloakClient identifier to send to the Backend. If left empty, the client ID of the current session is used.");
-        configProperties.add(keycloakClientProperty);
+        ProviderConfigProperty keycloakClientIdProperty = new ProviderConfigProperty();
+        keycloakClientIdProperty.setName(KEYCLOAK_CLIENT_ID);
+        keycloakClientIdProperty.setLabel("SPSH Keycloak Client");
+        keycloakClientIdProperty.setType(ProviderConfigProperty.STRING_TYPE);
+        keycloakClientIdProperty.setHelpText("The keycloakClientId identifier to send to the Backend. If left empty, the client ID of the current session is used.");
+        configProperties.add(keycloakClientIdProperty);
 
         ProviderConfigProperty includeEmailAddressProperty = new ProviderConfigProperty();
         includeEmailAddressProperty.setName(INCLUDE_EMAIL_ADDRESS);
@@ -114,17 +114,17 @@ public class SpshApiOidcMapper extends AbstractOIDCProtocolMapper implements OID
         String extractJsonPath = mappingModel.getConfig().get(EXTRACT_JSON_PATH);
         boolean ignoreMissingPath = Boolean.parseBoolean(mappingModel.getConfig().getOrDefault(IGNORE_MISSING_PATH, "false"));
         boolean includeEmailAddress = Boolean.parseBoolean(mappingModel.getConfig().getOrDefault(INCLUDE_EMAIL_ADDRESS, "false"));
-        String configuredKeycloakClient = mappingModel.getConfig().get(KEYCLOAK_CLIENT);
-        String defaultKeycloakClient = clientSessionCtx.getClientSession().getClient().getClientId();
-        String keycloakClient = (configuredKeycloakClient == null || configuredKeycloakClient.isEmpty())
-            ? defaultKeycloakClient : configuredKeycloakClient;
+        String configuredKeycloakClientId = mappingModel.getConfig().get(KEYCLOAK_CLIENT_ID);
+        String defaultKeycloakClientId = clientSessionCtx.getClientSession().getClient().getClientId();
+        String keycloakClientId = (configuredKeycloakClientId == null || configuredKeycloakClientId.isEmpty())
+            ? defaultKeycloakClientId : configuredKeycloakClientId;
         String userSub = userSession.getUser().getId();
 
         LOGGER.info(String.format("Setting claims via custom SpshApiOidcMapper for userSub: %s", userSub));
         LOGGER.debug(String.format("Using fetchUrl: %s", fetchUrl));
         LOGGER.debug(String.format("Using extractJsonPath: %s", extractJsonPath));
         LOGGER.debug(String.format("Using userSub: %s", userSub));
-        LOGGER.debug(String.format("Using keycloakClient: %s", keycloakClient));
+        LOGGER.debug(String.format("Using keycloakClientId: %s", keycloakClientId));
         LOGGER.debug(String.format("Using includeEmailAddress: %b", includeEmailAddress));
 
         if (fetchUrl == null) {
@@ -141,7 +141,7 @@ public class SpshApiOidcMapper extends AbstractOIDCProtocolMapper implements OID
         }
 
         try {
-            String responseData = ApiFetchHelper.fetchApiData(fetchUrl, userSub, keycloakClient, includeEmailAddress);
+            String responseData = ApiFetchHelper.fetchApiData(fetchUrl, userSub, keycloakClientId, includeEmailAddress);
             boolean isExisting = ApiFetchHelper.isPathExisting(responseData, extractJsonPath);
             if(!isExisting && ignoreMissingPath) {
                 LOGGER.info(String.format("Ignoring due to configuration that JSON Path %s does not exist in response", extractJsonPath));

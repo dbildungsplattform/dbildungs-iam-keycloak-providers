@@ -17,9 +17,9 @@ public class ApiFetchHelper {
 
     public static final String ENV_KEY_INTERNAL_COMMUNICATION_API_KEY = "INTERNAL_COMMUNICATION_API_KEY";
 
-    public static String fetchApiData(String url, String userSub, String keycloakClient, boolean includeEmailAddress) throws IOException {
+    public static String fetchApiData(String url, String userSub, String keycloakClientId, boolean includeEmailAddress) throws IOException {
         String apiKey = requireApiKey();
-        HttpPost request = buildRequest(url, apiKey, userSub, keycloakClient, includeEmailAddress);
+        HttpPost request = buildRequest(url, apiKey, userSub, keycloakClientId, includeEmailAddress);
 
         try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
             return httpClient.execute(request, ApiFetchHelper::readResponseBody);
@@ -35,19 +35,19 @@ public class ApiFetchHelper {
         return apiKey;
     }
 
-    private static HttpPost buildRequest(String url, String apiKey, String userSub, String keycloakClient, boolean includeEmailAddress) {
+    private static HttpPost buildRequest(String url, String apiKey, String userSub, String keycloakClientId, boolean includeEmailAddress) {
         HttpPost request = new HttpPost(url);
         request.setHeader("Content-Type", "application/json");
         request.setHeader("api-key", apiKey);
-        request.setEntity(new StringEntity(buildRequestBody(userSub, keycloakClient, includeEmailAddress)));
+        request.setEntity(new StringEntity(buildRequestBody(userSub, keycloakClientId, includeEmailAddress)));
 
         return request;
     }
 
-    private static String buildRequestBody(String userSub, String keycloakClient, boolean includeEmailAddress) {
+    private static String buildRequestBody(String userSub, String keycloakClientId, boolean includeEmailAddress) {
         return String.format(
-            "{\"sub\":\"%s\",\"keycloakClient\":\"%s\",\"includeEmailAddress\":%b}",
-            escapeJson(userSub), escapeJson(keycloakClient), includeEmailAddress);
+            "{\"sub\":\"%s\",\"keycloakClientId\":\"%s\",\"includeEmailAddress\":%b}",
+            escapeJson(userSub), escapeJson(keycloakClientId), includeEmailAddress);
     }
 
     private static String readResponseBody(ClassicHttpResponse response) throws HttpException, IOException {
