@@ -6,8 +6,11 @@ import java.util.List;
 import org.jboss.logging.Logger;
 import org.keycloak.models.ClientSessionContext;
 import org.keycloak.models.KeycloakSession;
+import org.keycloak.models.ProtocolMapperContainerModel;
 import org.keycloak.models.ProtocolMapperModel;
+import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserSessionModel;
+import org.keycloak.protocol.ProtocolMapperConfigException;
 import org.keycloak.protocol.ProtocolMapperUtils;
 import org.keycloak.protocol.oidc.mappers.AbstractOIDCProtocolMapper;
 import org.keycloak.protocol.oidc.mappers.OIDCAccessTokenMapper;
@@ -104,6 +107,17 @@ public class SpshApiOidcMapper extends AbstractOIDCProtocolMapper implements OID
     @Override
     public String getId() {
         return PROVIDER_ID;
+    }
+
+    @Override
+    public void validateConfig(KeycloakSession session, RealmModel realm, ProtocolMapperContainerModel client, ProtocolMapperModel mapperModel)
+        throws ProtocolMapperConfigException {
+        String keycloakClientId = mapperModel.getConfig().get(KEYCLOAK_CLIENT_ID);
+        if (!ApiFetchHelper.isValidKeycloakClientId(keycloakClientId)) {
+            throw new ProtocolMapperConfigException(
+                "The configured Keycloak Client must only contain letters, digits, '.', '_' and '-'.",
+                "spshInvalidKeycloakClientId");
+        }
     }
 
     @Override

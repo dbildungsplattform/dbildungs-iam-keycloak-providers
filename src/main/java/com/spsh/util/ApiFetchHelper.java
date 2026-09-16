@@ -1,6 +1,7 @@
 package com.spsh.util;
 
 import java.io.IOException;
+import java.util.regex.Pattern;
 
 import org.apache.hc.client5.http.classic.methods.HttpPost;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
@@ -16,6 +17,13 @@ import com.jayway.jsonpath.JsonPath;
 public class ApiFetchHelper {
 
     public static final String ENV_KEY_INTERNAL_COMMUNICATION_API_KEY = "INTERNAL_COMMUNICATION_API_KEY";
+
+    // Keycloak client IDs are conventionally alphanumeric plus '.', '_', '-'; used to validate mapper config at save time.
+    private static final Pattern SAFE_KEYCLOAK_CLIENT_ID_PATTERN = Pattern.compile("^[A-Za-z0-9._-]*$");
+
+    public static boolean isValidKeycloakClientId(String keycloakClientId) {
+        return keycloakClientId == null || SAFE_KEYCLOAK_CLIENT_ID_PATTERN.matcher(keycloakClientId).matches();
+    }
 
     public static String fetchApiData(String url, String userSub, String keycloakClientId, boolean includeEmailAddress) throws IOException {
         String apiKey = requireApiKey();
@@ -78,7 +86,26 @@ public class ApiFetchHelper {
             return "";
         }
 
-        return value.replace("\\", "\\\\").replace("\"", "\\\"");
+        StringBuilder escaped = new StringBuilder(value.length());
+        for (char character : value.toCharArray()) {
+            switch (character) {
+                case '\\' -> escaped.append("\\\\");
+                case '"' -> escaped.append("\\\"");
+                case '\b' -> escaped.append("\\b");
+                case '\f' -> escaped.append("\\f");
+                case '\n' -> escaped.append("\\n");
+                case '\r' -> escaped.append("\\r");
+                case '\t' -> escaped.append("\\t");
+                default -> {
+                    if (character < 0x20) {
+                        escaped.append(String.format("\\u%04x", (int) character));
+                    } else {
+                        escaped.append(character);
+                    }
+                }
+            }
+        }
+        return escaped.toString();
     }
 }
 
