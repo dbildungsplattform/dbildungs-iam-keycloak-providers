@@ -40,13 +40,15 @@ To verify the providers, you can use the `vidis-test` client (Keycloak client "V
 
 ## Deploying to staging / production
 
-This repository has no CI/CD of its own — the built JAR (step 1 above) is committed as a binary into `dbildungs-iam-keycloak/src/providers/`, and all image builds happen in that repository's GitHub Actions:
+This repository has no CI/CD of its own. The JAR you build locally (step 1 above) is target-agnostic — it's just a plain Java artifact, unrelated to any Docker `--target`. Once it's committed into `dbildungs-iam-keycloak/src/providers/`, it is picked up by **every** image build of that repository, because the `Dockerfile` copies `src/providers/` in its shared `base` stage, which both the `development` (local, `build-dev.sh`) and `deployment` (staging/production, built by CI) stages are derived from. So there is no separate build step needed for staging/production — the same JAR you already tested locally is exactly what ships everywhere.
+
+Steps to actually get a change live:
 
 1. Build the JAR (`mvn clean package`) and copy it into `../dbildungs-iam-keycloak/src/providers/`, as described above. If you changed the provider logic, consider bumping the `<version>` in [`pom.xml`](./pom.xml) (and the resulting JAR filename referenced in `Dockerfile`/`README.md` of `dbildungs-iam-keycloak`) so the change is traceable.
-2. Commit the updated JAR in `dbildungs-iam-keycloak` and push it on a branch / open a PR.
-   - Every push to a non-`main` branch automatically builds and publishes a Docker image tagged with the ticket/branch identifier (workflow `image-and-helm-publish-check-deploy-on-push-scheduled.yml`, `target: deployment`), and can be deployed to a review/staging environment.
-   - After merging to `main`, the same workflow builds and publishes the image tagged with the commit hash and `latest`.
-3. To create an official production release, push a SemVer Git tag (e.g. `1.9.0`) on `dbildungs-iam-keycloak`. This triggers `create-release.yml`, which builds/publishes the `deployment` target image tagged with that version and releases the matching Helm chart.
+2. Commit the updated JAR **in the `dbildungs-iam-keycloak` repository** (not here) on a feature/ticket branch, and push it.
+   - This alone already triggers `image-and-helm-publish-check-deploy-on-push-scheduled.yml`, which builds and publishes a Docker image (`target: deployment`) tagged with the ticket/branch identifier — usable to deploy the change to a review/staging environment.
+   - After merging that branch into `main`, the same workflow builds and publishes an image tagged with the commit hash and `latest`.
+3. To create an official, versioned production release, push a SemVer Git tag (e.g. `1.9.0`) on `dbildungs-iam-keycloak`. This triggers `create-release.yml`, which builds/publishes the `deployment` target image tagged with that version and releases the matching Helm chart.
 
-There is no separate "production build" step for the provider itself — once the JAR is committed, the existing `dbildungs-iam-keycloak` pipelines take care of building and shipping the image for every environment.
+`build-dev.sh` (`--target development`) is only ever used for your local Docker container and is unrelated to this — it is never invoked by CI.
 
