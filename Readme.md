@@ -33,6 +33,7 @@ To test local changes to the providers in a Keycloak instance started via `dbild
     docker compose rm -sf keycloak
     docker compose --profile third-party up -d keycloak
     ```
+    > Note: this wipes all Keycloak users (Keycloak's `dev-file` storage isn't persisted outside the container), so the `dbildungs-iam-server` DB ends up out of sync with it. If logins subsequently fail with `invalid_grant`, see the [troubleshooting note](#troubleshooting-invalid_grant--invalid-user-credentials) below.
 
 The admin console is then available at [http://localhost:8080/admin/master/console/](http://localhost:8080/admin/master/console/) (login `admin`/`admin`).
 
@@ -56,12 +57,26 @@ Steps to actually get a change live:
 
 The `vidis-test` client has `directAccessGrantsEnabled: false` by default, so it doesn't support the OAuth2 password grant out of the box. To still pull a real access token via curl (e.g. to check whether the custom claims from the providers actually show up), temporarily flip that setting through the Admin REST API, request a token, then revert it. This works the same way locally and against a dev/feature deployment — only `KEYCLOAK_URL` and the admin credentials differ (see the internal deployment docs for the actual dev/feature Keycloak URL).
 
+A ready-to-use script that automates all of the steps below (plus sanity checks and error handling) is checked in at [`scripts/verify-vidis-token.sh`](./scripts/verify-vidis-token.sh):
+
+```bash
+./scripts/verify-vidis-token.sh
+```
+
+It picks up `KEYCLOAK_URL`, `REALM`, `CLIENT_ID`, `ADMIN_USER`, `ADMIN_PASSWORD`, `TEST_USERNAME` and `TEST_PASSWORD` from your shell environment if already exported, and otherwise falls back to the same local-dev defaults used below — so it works unchanged for a dev/feature deployment too, e.g.:
+
+```bash
+KEYCLOAK_URL="https://<namespace>-keycloak.<dev-domain>" ADMIN_PASSWORD="<from 1Password>" ./scripts/verify-vidis-token.sh
+```
+
+The manual, step-by-step version of what the script does:
+
 ```bash
 KEYCLOAK_URL="http://localhost:8080"     # dev/feature: use the Keycloak URL of that environment
 REALM="SPSH"
 ADMIN_USER="admin"
 ADMIN_PASSWORD="admin"                    # local; for dev/feature take this from the cluster's 1Password vault
-TEST_USERNAME="ssuperadmin"
+TEST_USERNAME="smueller"                  # seeded with the VIDIS test Angebot; e.g. ssuperadmin has none
 TEST_PASSWORD="SPSHtest1!"
 
 # 1. Get an admin token (master realm, admin-cli allows the password grant)
@@ -93,4 +108,28 @@ echo "$TOKEN" | cut -d. -f2 | base64 -d 2>/dev/null | jq
 ```
 
 Afterwards, repeat step 2 with `directAccessGrantsEnabled=false` to restore the client's original configuration.
+
+#### Finding `directAccessGrantsEnabled` in the Admin UI
+
+If you prefer to toggle it manually in the Admin Console instead of via curl (step 2 below):
+
+1. Select the **SPSH** realm (top left)
+2. **Clients** → click on the `vidis-test` client
+3. **Settings** tab → **Capability config** section
+4. Toggle **"Direct access grants"** — this is `directAccessGrantsEnabled` in the JSON/REST API. Don't forget **Save**, and switch it back off after testing.
+
+#### Troubleshooting: `invalid_grant` / "Invalid user credentials"
+
+Recreating the local Keycloak container (`docker compose rm -sf keycloak && docker compose --profile third-party up -d keycloak`) wipes all users, since Keycloak's `dev-file` storage isn't persisted outside the container. The `dbildungs-iam-server` Postgres DB, however, still has the old person data — so it's now out of sync with the fresh Keycloak instance, and logins fail with `invalid_grant`.
+
+Simply re-seeding on top of that DB doesn't work either (existing rows conflict with the seed data — `DbSeedConsole` even refuses with "Seeding data has already been created in database!"). Removing just the `db` container isn't enough either, since its data lives in the named `db-data` Docker volume, which survives container recreation — `docker compose rm/down -v` only removes *anonymous* volumes, not named ones, and `docker compose down` can't be scoped to a single service anyway (it would also wipe the mariadb/kafka volumes). So the named volume has to be removed explicitly, then the full setup re-run so persons/Keycloak-users are recreated in sync:
+
+```bash
+cd ../dbildungs-iam-server
+docker compose rm -sf db && docker volume rm dbildungs-iam-server_db-data
+docker compose up -d db
+npm run setup   # db:migration-apply + keycloak:update-clients + db:seed dev
+```
+
+
 
