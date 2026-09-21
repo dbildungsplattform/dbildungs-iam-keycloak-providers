@@ -116,7 +116,7 @@ public class SpshApiOidcMapper extends AbstractOIDCProtocolMapper implements OID
         if (!ApiFetchHelper.isValidKeycloakClientId(keycloakClientId)) {
             throw new ProtocolMapperConfigException(
                 "The configured Keycloak Client must only contain letters, digits, '.', '_' and '-'.",
-                "spshInvalidKeycloakClientId");
+                KEYCLOAK_CLIENT_ID);
         }
     }
 
