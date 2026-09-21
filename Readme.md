@@ -38,7 +38,7 @@ The admin console is then available at [http://localhost:8080/admin/master/conso
 
 To verify the providers, you can use the `vidis-test` client (Keycloak client "VIDIS-Testumgebung") — it is already preconfigured with the 6 mappers (`rolle`, `schulkennung`, `vorname`, `email`, `nachname`, `uid`) of type `spsh-custom-oidc-api-mapper` and already uses the V2 solution (`keycloakClientId`/`includeEmailAddress`), see `dbildungs-iam-server/config/dev-realm-spsh.json`.
 
-## Deploying to staging / production
+## Deploying to dev / staging / production
 
 This repository has no CI/CD of its own. The JAR you build locally (step 1 above) is target-agnostic — it's just a plain Java artifact, unrelated to any Docker `--target`. Once it's committed into `dbildungs-iam-keycloak/src/providers/`, it is picked up by **every** image build of that repository, because the `Dockerfile` copies `src/providers/` in its shared `base` stage, which both the `development` (local, `build-dev.sh`) and `deployment` (staging/production, built by CI) stages are derived from. So there is no separate build step needed for staging/production — the same JAR you already tested locally is exactly what ships everywhere.
 
@@ -51,4 +51,46 @@ Steps to actually get a change live:
 3. To create an official, versioned production release, push a SemVer Git tag (e.g. `1.9.0`) on `dbildungs-iam-keycloak`. This triggers `create-release.yml`, which builds/publishes the `deployment` target image tagged with that version and releases the matching Helm chart.
 
 `build-dev.sh` (`--target development`) is only ever used for your local Docker container and is unrelated to this — it is never invoked by CI.
+
+## Verifying a token via curl (local & dev/feature deployment)
+
+The `vidis-test` client has `directAccessGrantsEnabled: false` by default, so it doesn't support the OAuth2 password grant out of the box. To still pull a real access token via curl (e.g. to check whether the custom claims from the providers actually show up), temporarily flip that setting through the Admin REST API, request a token, then revert it. This works the same way locally and against a dev/feature deployment — only `KEYCLOAK_URL` and the admin credentials differ (see the internal deployment docs for the actual dev/feature Keycloak URL).
+
+```bash
+KEYCLOAK_URL="http://localhost:8080"     # dev/feature: use the Keycloak URL of that environment
+REALM="SPSH"
+ADMIN_USER="admin"
+ADMIN_PASSWORD="admin"                    # local; for dev/feature take this from the cluster's 1Password vault
+TEST_USERNAME="ssuperadmin"
+TEST_PASSWORD="SPSHtest1!"
+
+# 1. Get an admin token (master realm, admin-cli allows the password grant)
+ADMIN_TOKEN=$(curl -s -X POST "$KEYCLOAK_URL/realms/master/protocol/openid-connect/token" \
+  -d grant_type=password -d client_id=admin-cli \
+  -d username="$ADMIN_USER" -d password="$ADMIN_PASSWORD" \
+  | jq -r .access_token)
+
+# 2. Look up the vidis-test client UUID and temporarily enable the password grant
+CLIENT_UUID=$(curl -s "$KEYCLOAK_URL/admin/realms/$REALM/clients?clientId=vidis-test" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" | jq -r '.[0].id')
+
+curl -s -X PUT "$KEYCLOAK_URL/admin/realms/$REALM/clients/$CLIENT_UUID" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+  -d "$(curl -s "$KEYCLOAK_URL/admin/realms/$REALM/clients/$CLIENT_UUID" \
+        -H "Authorization: Bearer $ADMIN_TOKEN" | jq '.directAccessGrantsEnabled=true')"
+
+# 3. Get the token for a real user via vidis-test (secret fetched via API, never hardcoded)
+VIDIS_SECRET=$(curl -s "$KEYCLOAK_URL/admin/realms/$REALM/clients/$CLIENT_UUID/client-secret" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" | jq -r .value)
+
+TOKEN=$(curl -s -X POST "$KEYCLOAK_URL/realms/$REALM/protocol/openid-connect/token" \
+  -d grant_type=password -d client_id=vidis-test -d client_secret="$VIDIS_SECRET" \
+  -d username="$TEST_USERNAME" -d password="$TEST_PASSWORD" \
+  | jq -r .access_token)
+
+# 4. Inspect the claims in the access token (rolle, schulkennung, vorname, email, nachname, uid)
+echo "$TOKEN" | cut -d. -f2 | base64 -d 2>/dev/null | jq
+```
+
+Afterwards, repeat step 2 with `directAccessGrantsEnabled=false` to restore the client's original configuration.
 
