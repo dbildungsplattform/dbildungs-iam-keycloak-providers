@@ -7,23 +7,24 @@
 # manual, step-by-step version of what this script automates.
 #
 # Usage:
-#   ./scripts/verify-vidis-token.sh
+#   ./scripts/verify-vidis-token.sh [options]
 #
-# All settings can be overridden via environment variables already exported
-# in your shell; anything not set falls back to the local-dev defaults from
-# the README:
-#   KEYCLOAK_URL    default: http://localhost:8080
-#   REALM           default: SPSH
-#   CLIENT_ID       default: vidis-test
-#   ADMIN_USER      default: admin
-#   ADMIN_PASSWORD  default: admin
-#   TEST_USERNAME   default: smueller (seeded with the VIDIS test Angebot, ssuperadmin has none)
-#   TEST_PASSWORD   default: SPSHtest1!
+# Precedence for every setting: CLI flag > environment variable > default.
+#
+# Options (each also configurable via the environment variable in parentheses):
+#   --keycloak-url URL       (KEYCLOAK_URL)    default: http://localhost:8080
+#   --realm REALM            (REALM)           default: SPSH
+#   --client-id CLIENT_ID    (CLIENT_ID)       default: vidis-test
+#   --admin-user USER        (ADMIN_USER)      default: admin
+#   --admin-password PASS    (ADMIN_PASSWORD)  default: admin
+#   --test-username USER     (TEST_USERNAME)   default: smueller (seeded with the VIDIS test Angebot, ssuperadmin has none)
+#   --test-password PASS     (TEST_PASSWORD)   default: SPSHtest1!
+#   -h, --help               show this help and exit
 #
 # Example for a dev/feature deployment:
-#   KEYCLOAK_URL="https://<namespace>-keycloak.<dev-domain>" \
-#   ADMIN_PASSWORD="<from 1Password>" \
-#   ./scripts/verify-vidis-token.sh
+#   ./scripts/verify-vidis-token.sh \
+#     --keycloak-url "https://<namespace>-keycloak.<dev-domain>" \
+#     --admin-password "<from 1Password>"
 
 set -euo pipefail
 
@@ -33,8 +34,27 @@ set -euo pipefail
 : "${CLIENT_ID:=vidis-test}"
 : "${ADMIN_USER:=admin}"
 : "${ADMIN_PASSWORD:=admin}"
-: "${TEST_USERNAME:=smueller}"
+: "${TEST_USERNAME:=hschuster}"
 : "${TEST_PASSWORD:=SPSHtest1!}"
+
+usage() {
+    sed -n '2,/^set -euo pipefail/p' "$0" | sed '$d; s/^# \{0,1\}//'
+}
+
+# ---- 0b. CLI flags override env vars/defaults ----
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --keycloak-url) KEYCLOAK_URL="$2"; shift 2 ;;
+        --realm) REALM="$2"; shift 2 ;;
+        --client-id) CLIENT_ID="$2"; shift 2 ;;
+        --admin-user) ADMIN_USER="$2"; shift 2 ;;
+        --admin-password) ADMIN_PASSWORD="$2"; shift 2 ;;
+        --test-username) TEST_USERNAME="$2"; shift 2 ;;
+        --test-password) TEST_PASSWORD="$2"; shift 2 ;;
+        -h|--help) usage; exit 0 ;;
+        *) echo "Unknown option: $1 (use --help for usage)" >&2; exit 1 ;;
+    esac
+done
 
 log() { printf '\n\033[1;34m==> %s\033[0m\n' "$1"; }
 die() { printf '\033[1;31mError: %s\033[0m\n' "$1" >&2; exit 1; }
