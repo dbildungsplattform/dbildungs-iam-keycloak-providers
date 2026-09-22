@@ -9,8 +9,11 @@ import org.keycloak.dom.saml.v2.assertion.AttributeStatementType.ASTChoiceType;
 import org.keycloak.dom.saml.v2.assertion.AttributeType;
 import org.keycloak.models.AuthenticatedClientSessionModel;
 import org.keycloak.models.KeycloakSession;
+import org.keycloak.models.ProtocolMapperContainerModel;
 import org.keycloak.models.ProtocolMapperModel;
+import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserSessionModel;
+import org.keycloak.protocol.ProtocolMapperConfigException;
 import org.keycloak.protocol.saml.mappers.AbstractSAMLProtocolMapper;
 import org.keycloak.protocol.saml.mappers.SAMLAttributeStatementMapper;
 import org.keycloak.provider.ProviderConfigProperty;
@@ -23,6 +26,8 @@ public class SpshApiSamlMapper extends AbstractSAMLProtocolMapper implements SAM
     public static final String PROVIDER_ID = "spsh-custom-saml-api-mapper";
     public static final String FETCH_URL = "fetchUrl";
     public static final String EXTRACT_JSON_PATH = "extractJsonPath";
+    public static final String KEYCLOAK_CLIENT_ID = "keycloakClientId";
+    public static final String INCLUDE_EMAIL_ADDRESS = "includeEmailAddress";
     private static final List<ProviderConfigProperty> configProperties = new ArrayList<>();
     private static final Logger LOGGER = Logger.getLogger(SpshApiSamlMapper.class);
 
@@ -40,6 +45,20 @@ public class SpshApiSamlMapper extends AbstractSAMLProtocolMapper implements SAM
         extractPathProperty.setType(ProviderConfigProperty.STRING_TYPE);
         extractPathProperty.setHelpText("The JSON path to extract data from the API response.");
         configProperties.add(extractPathProperty);
+
+        ProviderConfigProperty keycloakClientIdProperty = new ProviderConfigProperty();
+        keycloakClientIdProperty.setName(KEYCLOAK_CLIENT_ID);
+        keycloakClientIdProperty.setLabel("SPSH Keycloak Client");
+        keycloakClientIdProperty.setType(ProviderConfigProperty.STRING_TYPE);
+        keycloakClientIdProperty.setHelpText("The keycloakClientId identifier to send to the Backend. If left empty, the client ID of the current session is used.");
+        configProperties.add(keycloakClientIdProperty);
+
+        ProviderConfigProperty includeEmailAddressProperty = new ProviderConfigProperty();
+        includeEmailAddressProperty.setName(INCLUDE_EMAIL_ADDRESS);
+        includeEmailAddressProperty.setLabel("SPSH Include Email Address");
+        includeEmailAddressProperty.setType(ProviderConfigProperty.BOOLEAN_TYPE);
+        includeEmailAddressProperty.setHelpText("Whether to request the user's email address from the Backend.");
+        configProperties.add(includeEmailAddressProperty);
     }
 
     @Override
@@ -68,17 +87,33 @@ public class SpshApiSamlMapper extends AbstractSAMLProtocolMapper implements SAM
     }
 
     @Override
+    public void validateConfig(KeycloakSession session, RealmModel realm, ProtocolMapperContainerModel client, ProtocolMapperModel mapperModel)
+        throws ProtocolMapperConfigException {
+        String keycloakClientId = mapperModel.getConfig().get(KEYCLOAK_CLIENT_ID);
+        if (!ApiFetchHelper.isValidKeycloakClientId(keycloakClientId)) {
+            throw new ProtocolMapperConfigException(
+                "The configured Keycloak Client must only contain letters, digits, '.', '_' and '-'.",
+                KEYCLOAK_CLIENT_ID);
+        }
+    }
+
+    @Override
     public void transformAttributeStatement(AttributeStatementType attributeStatement, ProtocolMapperModel mappingModel,
         KeycloakSession session, UserSessionModel userSession, AuthenticatedClientSessionModel clientSession) {
 
         String fetchUrl = mappingModel.getConfig().get(FETCH_URL);
         String extractJsonPath = mappingModel.getConfig().get(EXTRACT_JSON_PATH);
+        boolean includeEmailAddress = Boolean.parseBoolean(mappingModel.getConfig().getOrDefault(INCLUDE_EMAIL_ADDRESS, "false"));
+        String keycloakClientId = resolveKeycloakClientId(
+            mappingModel.getConfig().get(KEYCLOAK_CLIENT_ID), clientSession.getClient().getClientId());
         String userSub = userSession.getUser().getId();
 
         LOGGER.info(String.format("Setting SAML attribute via custom SpshApiSamlMapper for userSub: %s", userSub));
         LOGGER.debug(String.format("Using fetchUrl: %s", fetchUrl));
         LOGGER.debug(String.format("Using extractJsonPath: %s", extractJsonPath));
         LOGGER.debug(String.format("Using userSub: %s", userSub));
+        LOGGER.debug(String.format("Using keycloakClientId: %s", keycloakClientId));
+        LOGGER.debug(String.format("Using includeEmailAddress: %b", includeEmailAddress));
 
         if (fetchUrl == null) {
             LOGGER.warn("SpshApiOidcMapper: fetchUrl is null. No data will be fetched, extracted and mapped.");
@@ -94,7 +129,7 @@ public class SpshApiSamlMapper extends AbstractSAMLProtocolMapper implements SAM
         }
 
         try {
-            String responseData = ApiFetchHelper.fetchApiData(fetchUrl, userSub);
+            String responseData = ApiFetchHelper.fetchApiData(fetchUrl, userSub, keycloakClientId, includeEmailAddress);
             Object extractedValue = ApiFetchHelper.extractFromJson(responseData, extractJsonPath);
             if (extractedValue != null) {
                 AttributeType samlAttribute = new AttributeType(mappingModel.getName());
@@ -105,5 +140,10 @@ public class SpshApiSamlMapper extends AbstractSAMLProtocolMapper implements SAM
         } catch (Exception e) {
             LOGGER.error("Error fetching or processing API data", e);
         }
+    }
+
+    private static String resolveKeycloakClientId(String configuredKeycloakClientId, String defaultKeycloakClientId) {
+        return (configuredKeycloakClientId == null || configuredKeycloakClientId.isEmpty())
+            ? defaultKeycloakClientId : configuredKeycloakClientId;
     }
 }
