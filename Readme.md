@@ -2,13 +2,65 @@
 
 This repository is designed for creating custom **providers** for our **dbildungs-iam-keycloak** instance. It serves as the foundation for extending Keycloak's functionality to meet our specific requirements, such as custom protocol mappers, event listeners, and other extensions.
 
+## Mapper failure handling
+
+Backend HTTP errors (all non-2xx responses), connection failures and response processing exceptions abort mapping. Both mappers throw the shared `com.spsh.util.TokenInterceptorException` and retain the original cause. The error message identifies the affected protocol: `Failed to fetch or process SPSH API data for OIDC token` or `Failed to fetch or process SPSH API data for SAML assertion`. `TokenInterceptorException` is a custom runtime exception.
+
+Behavior covered by the mapper tests:
+
+- OIDC: `TokenManager.createClientAccessToken` propagates mapper exceptions. `AccessTokenResponseBuilder.generateAccessToken()` therefore aborts before the response is built or the token is signed.
+- SAML: `SamlProtocol.authenticated` catches the mapper exception and returns `ErrorPage.error` with `BAD_REQUEST` instead of building the authenticated SAML response.
+- `ignoreMissingPath=true` still allows an absent optional JSON path in a successful OIDC response; it does not suppress backend errors. Existing handling of missing mapper configuration is unchanged.
+
+## Running Tests
+
+Run tests from the repository root. These commands do not create a provider JAR:
+
+```bash
+mvn test
+mvn -Dtest=SpshApiOidcMapperTest test
+mvn -Dtest=SpshApiSamlMapperTest test
+```
+
+With JDK 26, append `-DargLine=-Dnet.bytebuddy.experimental=true` to any of the commands above, for example:
+
+```bash
+mvn test -DargLine=-Dnet.bytebuddy.experimental=true
+```
+
+Test reports are written to `target/surefire-reports/`.
+
+## Building the Provider
+
+Always use the Keycloak version from the [dbildungs-iam-keycloak Dockerfile on GitHub](https://github.com/dbildungsplattform/dbildungs-iam-keycloak/blob/main/Dockerfile) as the source of truth. Keep `keycloak.version` in `pom.xml` aligned with that image's Keycloak product version before building or testing. An image revision suffix is not part of the Keycloak product version and must not be included in the Maven dependency version.
+
+Build the provider JAR from the repository root:
+
+```bash
+mvn clean package
+```
+
+The bundled JAR is written to `target/keycloak-providers-1.8.jar`.
+
+To also run the Maven verification phase, use:
+
+```bash
+mvn clean verify
+```
+
+Both build commands execute tests by default. The JDK 26 compatibility argument also applies to builds:
+
+```bash
+mvn clean package -DargLine=-Dnet.bytebuddy.experimental=true
+```
+
 ## Local Setup
 
 Prerequisite: [Maven](https://maven.apache.org/) (e.g. via `brew install maven`) and Docker.
 
 To test local changes to the providers in a Keycloak instance started via `dbildungs-iam-server/compose.yaml`:
 
-1. Build the provider JAR:
+1. Build the provider JAR (see [Building the Provider](#building-the-provider) for the JDK 26 compatibility argument):
     ```bash
     mvn clean package
     ```

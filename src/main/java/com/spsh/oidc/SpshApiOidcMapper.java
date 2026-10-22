@@ -21,6 +21,7 @@ import org.keycloak.provider.ProviderConfigProperty;
 import org.keycloak.representations.IDToken;
 
 import com.spsh.util.ApiFetchHelper;
+import com.spsh.util.TokenInterceptorException;
 
 import jakarta.ws.rs.InternalServerErrorException;
 
@@ -167,7 +168,7 @@ public class SpshApiOidcMapper extends AbstractOIDCProtocolMapper implements OID
                 OIDCAttributeMapperHelper.mapClaim(token, mappingModel, extractedValue);
             }
         } catch (Exception e) {
-            e.printStackTrace();
+            throw new TokenInterceptorException("Failed to fetch or process SPSH API data for OIDC token", e);
         }
 
     }
