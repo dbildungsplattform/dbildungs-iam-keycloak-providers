@@ -38,8 +38,6 @@ import org.keycloak.representations.AccessToken;
 import com.spsh.util.TokenInterceptorException;
 import com.spsh.utils.SpshBackendMock;
 
-import jakarta.ws.rs.core.UriInfo;
-
 class SpshApiOidcMapperTest {
 
     private SpshBackendMock backend;
@@ -172,11 +170,11 @@ class SpshApiOidcMapperTest {
         TokenManager tokenManager = new TokenManager() {
             @Override
             protected AccessToken initToken(KeycloakSession keycloakSession, RealmModel realm, ClientModel clientModel,
-                UserModel user, UserSessionModel userSessionModel, ClientSessionContext context, UriInfo uriInfo) {
+                UserModel user, UserSessionModel userSessionModel, ClientSessionContext context, boolean isOffline) {
                 return accessToken;
             }
         };
-        var builder = tokenManager.new AccessTokenResponseBuilder(mock(RealmModel.class), client,
+        var builder = tokenManager.responseBuilder(mock(RealmModel.class), client,
             mock(EventBuilder.class), session, userSession, clientSessionContext);
 
         assertThrows(TokenInterceptorException.class, () -> builder.generateAccessToken().build());

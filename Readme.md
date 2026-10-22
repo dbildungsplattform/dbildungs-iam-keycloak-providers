@@ -4,9 +4,9 @@ This repository is designed for creating custom **providers** for our **dbildung
 
 ## Mapper failure handling
 
-Backend HTTP errors (all non-2xx responses), connection failures and response processing exceptions abort mapping. Both mappers throw the shared `com.spsh.util.TokenInterceptorException` and retain the original cause. The error message identifies the affected protocol: `Failed to fetch or process SPSH API data for OIDC token` or `Failed to fetch or process SPSH API data for SAML assertion`. `TokenInterceptorException` is a custom runtime exception, not a Keycloak API class in version 26.2.5.
+Backend HTTP errors (all non-2xx responses), connection failures and response processing exceptions abort mapping. Both mappers throw the shared `com.spsh.util.TokenInterceptorException` and retain the original cause. The error message identifies the affected protocol: `Failed to fetch or process SPSH API data for OIDC token` or `Failed to fetch or process SPSH API data for SAML assertion`. `TokenInterceptorException` is a custom runtime exception.
 
-Verified against the Keycloak 26.2.5 implementation used by this project:
+Behavior covered by the mapper tests:
 
 - OIDC: `TokenManager.createClientAccessToken` propagates mapper exceptions. `AccessTokenResponseBuilder.generateAccessToken()` therefore aborts before the response is built or the token is signed.
 - SAML: `SamlProtocol.authenticated` catches the mapper exception and returns `ErrorPage.error` with `BAD_REQUEST` instead of building the authenticated SAML response.
@@ -31,6 +31,8 @@ mvn test -DargLine=-Dnet.bytebuddy.experimental=true
 Test reports are written to `target/surefire-reports/`.
 
 ## Building the Provider
+
+Always use the Keycloak version from the [dbildungs-iam-keycloak Dockerfile on GitHub](https://github.com/dbildungsplattform/dbildungs-iam-keycloak/blob/main/Dockerfile) as the source of truth. Keep `keycloak.version` in `pom.xml` aligned with that image's Keycloak product version before building or testing. An image revision suffix is not part of the Keycloak product version and must not be included in the Maven dependency version.
 
 Build the provider JAR from the repository root:
 
