@@ -5,7 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertThrowsExactly;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -45,7 +45,6 @@ import org.keycloak.services.messages.Messages;
 import org.keycloak.sessions.AuthenticationSessionModel;
 import org.mockito.MockedStatic;
 
-import com.spsh.util.TokenInterceptorException;
 import com.spsh.utils.CapturingSamlProtocol;
 import com.spsh.utils.SpshBackendMock;
 
@@ -102,7 +101,7 @@ class SpshApiSamlMapperTest {
     void backendHttpErrorsAbortMapping(int responseStatus) {
         backend.setStatusCode(responseStatus);
 
-        TokenInterceptorException exception = assertThrows(TokenInterceptorException.class, this::map);
+        RuntimeException exception = assertThrowsExactly(RuntimeException.class, this::map);
 
         assertEquals("Failed to fetch or process SPSH API data for SAML assertion", exception.getMessage());
         assertInstanceOf(IOException.class, exception.getCause());
@@ -114,7 +113,7 @@ class SpshApiSamlMapperTest {
     void connectionErrorsAbortMapping() {
         backend.close();
 
-        TokenInterceptorException exception = assertThrows(TokenInterceptorException.class, this::map);
+        RuntimeException exception = assertThrowsExactly(RuntimeException.class, this::map);
 
         assertInstanceOf(IOException.class, exception.getCause());
         assertTrue(attributeStatement.getAttributes().isEmpty());
@@ -124,7 +123,7 @@ class SpshApiSamlMapperTest {
     void invalidJsonAbortsMapping() {
         backend.setResponseBody("{");
 
-        assertThrows(TokenInterceptorException.class, this::map);
+        assertThrowsExactly(RuntimeException.class, this::map);
 
         assertTrue(attributeStatement.getAttributes().isEmpty());
     }
@@ -133,7 +132,7 @@ class SpshApiSamlMapperTest {
     void missingRequiredPathAbortsMapping() {
         backend.setResponseBody("{}");
 
-        assertThrows(TokenInterceptorException.class, this::map);
+        assertThrowsExactly(RuntimeException.class, this::map);
 
         assertTrue(attributeStatement.getAttributes().isEmpty());
     }

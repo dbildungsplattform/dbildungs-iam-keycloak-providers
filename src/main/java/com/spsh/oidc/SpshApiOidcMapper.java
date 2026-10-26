@@ -17,11 +17,11 @@ import org.keycloak.protocol.oidc.mappers.OIDCAccessTokenMapper;
 import org.keycloak.protocol.oidc.mappers.OIDCAttributeMapperHelper;
 import org.keycloak.protocol.oidc.mappers.OIDCIDTokenMapper;
 import org.keycloak.protocol.oidc.mappers.UserInfoTokenMapper;
+import org.keycloak.protocol.oidc.token.TokenInterceptorException;
 import org.keycloak.provider.ProviderConfigProperty;
 import org.keycloak.representations.IDToken;
 
 import com.spsh.util.ApiFetchHelper;
-import com.spsh.util.TokenInterceptorException;
 
 import jakarta.ws.rs.InternalServerErrorException;
 
@@ -168,7 +168,11 @@ public class SpshApiOidcMapper extends AbstractOIDCProtocolMapper implements OID
                 OIDCAttributeMapperHelper.mapClaim(token, mappingModel, extractedValue);
             }
         } catch (Exception e) {
-            throw new TokenInterceptorException("Failed to fetch or process SPSH API data for OIDC token", e);
+            String message = "Failed to fetch or process SPSH API data for OIDC token";
+            LOGGER.error(message, e);
+            TokenInterceptorException exception = new TokenInterceptorException("server_error", message);
+            exception.initCause(e);
+            throw exception;
         }
 
     }

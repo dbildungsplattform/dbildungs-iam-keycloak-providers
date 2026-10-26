@@ -19,7 +19,6 @@ import org.keycloak.protocol.saml.mappers.SAMLAttributeStatementMapper;
 import org.keycloak.provider.ProviderConfigProperty;
 
 import com.spsh.util.ApiFetchHelper;
-import com.spsh.util.TokenInterceptorException;
 
 public class SpshApiSamlMapper extends AbstractSAMLProtocolMapper implements SAMLAttributeStatementMapper {
 
@@ -139,7 +138,7 @@ public class SpshApiSamlMapper extends AbstractSAMLProtocolMapper implements SAM
                 attributeStatement.addAttribute(attributeChoice);
             }
         } catch (Exception e) {
-            throw new TokenInterceptorException("Failed to fetch or process SPSH API data for SAML assertion", e);
+            throw new RuntimeException("Failed to fetch or process SPSH API data for SAML assertion", e);
         }
     }
 

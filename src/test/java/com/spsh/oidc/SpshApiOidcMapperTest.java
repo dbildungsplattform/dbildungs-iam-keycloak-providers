@@ -5,13 +5,18 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.RETURNS_SELF;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.io.IOException;
+import java.net.URI;
 import java.util.HashMap;
+import java.util.Set;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.AfterEach;
@@ -21,22 +26,40 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.keycloak.events.EventBuilder;
+import org.keycloak.http.HttpRequest;
+import org.keycloak.http.HttpResponse;
 import org.keycloak.models.AuthenticatedClientSessionModel;
 import org.keycloak.models.ClientModel;
 import org.keycloak.models.ClientSessionContext;
 import org.keycloak.models.KeycloakContext;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.KeycloakSessionFactory;
+import org.keycloak.models.KeycloakUriInfo;
 import org.keycloak.models.ProtocolMapperModel;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
 import org.keycloak.models.UserSessionModel;
+import org.keycloak.protocol.LoginProtocol;
 import org.keycloak.protocol.ProtocolMapper;
+import org.keycloak.protocol.oidc.OIDCLoginProtocol;
+import org.keycloak.protocol.oidc.OIDCProviderConfig;
 import org.keycloak.protocol.oidc.TokenManager;
+import org.keycloak.protocol.oidc.endpoints.TokenEndpoint;
+import org.keycloak.protocol.oidc.grants.OAuth2GrantType;
+import org.keycloak.protocol.oidc.token.TokenInterceptorException;
+import org.keycloak.protocol.oidc.utils.AuthorizeClientUtil;
 import org.keycloak.representations.AccessToken;
+import org.keycloak.representations.idm.OAuth2ErrorRepresentation;
+import org.keycloak.services.CorsErrorResponseException;
+import org.keycloak.services.cors.Cors;
+import org.keycloak.services.util.DPoPUtil;
+import org.mockito.MockedStatic;
 
-import com.spsh.util.TokenInterceptorException;
 import com.spsh.utils.SpshBackendMock;
+
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.MultivaluedHashMap;
+import jakarta.ws.rs.core.Response;
 
 class SpshApiOidcMapperTest {
 
@@ -98,7 +121,8 @@ class SpshApiOidcMapperTest {
 
         TokenInterceptorException exception = assertThrows(TokenInterceptorException.class, this::map);
 
-        assertEquals("Failed to fetch or process SPSH API data for OIDC token", exception.getMessage());
+        assertEquals("server_error", exception.getError());
+        assertEquals("Failed to fetch or process SPSH API data for OIDC token", exception.getDescription());
         assertInstanceOf(IOException.class, exception.getCause());
         assertEquals("Unexpected response status: " + responseStatus, exception.getCause().getMessage());
         assertTrue(accessToken.getOtherClaims().isEmpty());
@@ -181,6 +205,66 @@ class SpshApiOidcMapperTest {
 
         assertNull(builder.getAccessToken());
         verify(session, never()).tokens();
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {403, 500})
+    void failureReturnsStructuredOAuthError(int responseStatus) {
+        backend.setStatusCode(responseStatus);
+        prepareTokenEndpointContext();
+        OAuth2GrantType grant = mock(OAuth2GrantType.class);
+        when(session.getProvider(OAuth2GrantType.class, "authorization_code")).thenReturn(grant);
+        when(grant.getTokenParameterNames()).thenReturn(Set.of());
+        when(grant.process(any())).thenAnswer(invocation -> {
+            map();
+            return null;
+        });
+        AuthorizeClientUtil.ClientAuthResult clientAuth = mock(AuthorizeClientUtil.ClientAuthResult.class);
+        when(clientAuth.getClient()).thenReturn(client);
+        Cors cors = mock(Cors.class, RETURNS_SELF);
+        when(cors.add(any(Response.ResponseBuilder.class))).thenAnswer(invocation ->
+            invocation.<Response.ResponseBuilder>getArgument(0).build());
+
+        try (MockedStatic<Cors> corsBuilder = mockStatic(Cors.class);
+             MockedStatic<AuthorizeClientUtil> authorizeClient = mockStatic(AuthorizeClientUtil.class);
+             MockedStatic<DPoPUtil> dpop = mockStatic(DPoPUtil.class)) {
+            corsBuilder.when(Cors::builder).thenReturn(cors);
+            EventBuilder event = mock(EventBuilder.class);
+            authorizeClient.when(() -> AuthorizeClientUtil.authorizeClient(session, event, cors)).thenReturn(clientAuth);
+            TokenEndpoint endpoint = new TokenEndpoint(session, new TokenManager(), event);
+
+            CorsErrorResponseException exception = assertThrows(CorsErrorResponseException.class,
+                endpoint::processGrantRequest);
+
+            try (Response response = exception.getResponse()) {
+                assertEquals(400, response.getStatus());
+                assertEquals(MediaType.APPLICATION_JSON_TYPE, response.getMediaType());
+                OAuth2ErrorRepresentation error = assertInstanceOf(OAuth2ErrorRepresentation.class, response.getEntity());
+                assertEquals("server_error", error.getError());
+                assertEquals("Failed to fetch or process SPSH API data for OIDC token", error.getErrorDescription());
+            }
+        }
+    }
+
+    private void prepareTokenEndpointContext() {
+        KeycloakContext context = session.getContext();
+        RealmModel realm = mock(RealmModel.class);
+        when(realm.isEnabled()).thenReturn(true);
+        when(context.getRealm()).thenReturn(realm);
+        KeycloakUriInfo uri = mock(KeycloakUriInfo.class);
+        when(uri.getBaseUri()).thenReturn(URI.create("https://keycloak.test/"));
+        when(context.getUri()).thenReturn(uri);
+        HttpRequest request = mock(HttpRequest.class);
+        var parameters = new MultivaluedHashMap<String, String>();
+        parameters.putSingle("grant_type", "authorization_code");
+        when(request.getDecodedFormParameters()).thenReturn(parameters);
+        when(context.getHttpRequest()).thenReturn(request);
+        when(context.getHttpResponse()).thenReturn(mock(HttpResponse.class));
+        OIDCLoginProtocol loginProtocol = mock(OIDCLoginProtocol.class);
+        OIDCProviderConfig config = mock(OIDCProviderConfig.class);
+        when(config.getMaxLengthForTheParameter("grant_type", false)).thenReturn(255);
+        when(loginProtocol.getConfig()).thenReturn(config);
+        when(session.getProvider(LoginProtocol.class, OIDCLoginProtocol.LOGIN_PROTOCOL)).thenReturn(loginProtocol);
     }
 
     private void map() {
