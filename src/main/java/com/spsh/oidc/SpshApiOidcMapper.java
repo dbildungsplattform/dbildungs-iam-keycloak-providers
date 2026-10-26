@@ -172,6 +172,7 @@ public class SpshApiOidcMapper extends AbstractOIDCProtocolMapper implements OID
             LOGGER.error(message, e);
             TokenInterceptorException exception = new TokenInterceptorException("server_error", message);
             exception.initCause(e);
+           
             throw exception;
         }
 
