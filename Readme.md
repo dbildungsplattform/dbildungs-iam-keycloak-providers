@@ -30,12 +30,6 @@ mvn test -DargLine=-Dnet.bytebuddy.experimental=true
 
 Test reports are written to `target/surefire-reports/`.
 
-### Continuous Integration
-
-The [Provider Tests workflow](.github/workflows/provider-tests.yml) runs all unit tests on every push and pull request, without labels or branch/path filters. It can also be started manually from GitHub Actions.
-
-CI uses Temurin Java 21 and runs `mvn -B --no-transfer-progress clean test` with Maven dependency caching. Surefire reports are uploaded as the `provider-test-reports` artifact even when tests fail. Test failures fail the workflow. This workflow does not build or publish a provider JAR.
-
 ## Building the Provider
 
 Always use the Keycloak version from the [dbildungs-iam-keycloak Dockerfile on GitHub](https://github.com/dbildungsplattform/dbildungs-iam-keycloak/blob/main/Dockerfile) as the source of truth. Keep `keycloak.version` in `pom.xml` aligned with that image's Keycloak product version before building or testing. An image revision suffix is not part of the Keycloak product version and must not be included in the Maven dependency version.
