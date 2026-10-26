@@ -30,6 +30,12 @@ mvn test -DargLine=-Dnet.bytebuddy.experimental=true
 
 Test reports are written to `target/surefire-reports/`.
 
+### Continuous Integration
+
+The [Provider Tests workflow](.github/workflows/provider-tests.yml) runs all unit tests on every push and pull request, without labels or branch/path filters. It can also be started manually from GitHub Actions.
+
+CI uses Temurin Java 21 and runs `mvn -B --no-transfer-progress clean test` with Maven dependency caching. Surefire reports are uploaded as the `provider-test-reports` artifact even when tests fail. Test failures fail the workflow. This workflow does not build or publish a provider JAR.
+
 ## Building the Provider
 
 Always use the Keycloak version from the [dbildungs-iam-keycloak Dockerfile on GitHub](https://github.com/dbildungsplattform/dbildungs-iam-keycloak/blob/main/Dockerfile) as the source of truth. Keep `keycloak.version` in `pom.xml` aligned with that image's Keycloak product version before building or testing. An image revision suffix is not part of the Keycloak product version and must not be included in the Maven dependency version.
@@ -93,7 +99,7 @@ To verify the providers, you can use the `vidis-test` client (Keycloak client "V
 
 ## Deploying to dev / staging / production
 
-This repository has no CI/CD of its own. The JAR you build locally (step 1 above) is target-agnostic — it's just a plain Java artifact, unrelated to any Docker `--target`. Once it's committed into `dbildungs-iam-keycloak/src/providers/`, it is picked up by **every** image build of that repository, because the `Dockerfile` copies `src/providers/` in its shared `base` stage, which both the `development` (local, `build-dev.sh`) and `deployment` (staging/production, built by CI) stages are derived from. So there is no separate build step needed for staging/production — the same JAR you already tested locally is exactly what ships everywhere.
+This repository runs automated tests in CI but does not publish or deploy provider artifacts. The JAR you build locally (step 1 above) is target-agnostic — it's just a plain Java artifact, unrelated to any Docker `--target`. Once it's committed into `dbildungs-iam-keycloak/src/providers/`, it is picked up by **every** image build of that repository, because the `Dockerfile` copies `src/providers/` in its shared `base` stage, which both the `development` (local, `build-dev.sh`) and `deployment` (staging/production, built by CI) stages are derived from. So there is no separate build step needed for staging/production — the same JAR you already tested locally is exactly what ships everywhere.
 
 Steps to actually get a change live:
 
