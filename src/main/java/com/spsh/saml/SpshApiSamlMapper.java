@@ -26,6 +26,7 @@ public class SpshApiSamlMapper extends AbstractSAMLProtocolMapper implements SAM
     public static final String PROVIDER_ID = "spsh-custom-saml-api-mapper";
     public static final String FETCH_URL = "fetchUrl";
     public static final String EXTRACT_JSON_PATH = "extractJsonPath";
+    public static final String IGNORE_MISSING_PATH = "ignoreMissingPath";
     public static final String KEYCLOAK_CLIENT_ID = "keycloakClientId";
     public static final String INCLUDE_EMAIL_ADDRESS = "includeEmailAddress";
     private static final List<ProviderConfigProperty> configProperties = new ArrayList<>();
@@ -45,6 +46,13 @@ public class SpshApiSamlMapper extends AbstractSAMLProtocolMapper implements SAM
         extractPathProperty.setType(ProviderConfigProperty.STRING_TYPE);
         extractPathProperty.setHelpText("The JSON path to extract data from the API response.");
         configProperties.add(extractPathProperty);
+
+        ProviderConfigProperty ignoreMissingPathProperty = new ProviderConfigProperty();
+        ignoreMissingPathProperty.setName(IGNORE_MISSING_PATH);
+        ignoreMissingPathProperty.setLabel("SPSH Ignore Missing Path");
+        ignoreMissingPathProperty.setType(ProviderConfigProperty.BOOLEAN_TYPE);
+        ignoreMissingPathProperty.setHelpText("If the JSON path is absent from a successful Backend response, omit the attribute instead of failing.");
+        configProperties.add(ignoreMissingPathProperty);
 
         ProviderConfigProperty keycloakClientIdProperty = new ProviderConfigProperty();
         keycloakClientIdProperty.setName(KEYCLOAK_CLIENT_ID);
@@ -103,6 +111,7 @@ public class SpshApiSamlMapper extends AbstractSAMLProtocolMapper implements SAM
 
         String fetchUrl = mappingModel.getConfig().get(FETCH_URL);
         String extractJsonPath = mappingModel.getConfig().get(EXTRACT_JSON_PATH);
+        boolean ignoreMissingPath = Boolean.parseBoolean(mappingModel.getConfig().getOrDefault(IGNORE_MISSING_PATH, "false"));
         boolean includeEmailAddress = Boolean.parseBoolean(mappingModel.getConfig().getOrDefault(INCLUDE_EMAIL_ADDRESS, "false"));
         String keycloakClientId = resolveKeycloakClientId(
             mappingModel.getConfig().get(KEYCLOAK_CLIENT_ID), clientSession.getClient().getClientId());
@@ -130,10 +139,17 @@ public class SpshApiSamlMapper extends AbstractSAMLProtocolMapper implements SAM
 
         try {
             String responseData = ApiFetchHelper.fetchApiData(fetchUrl, userSub, keycloakClientId, includeEmailAddress);
+            if (ignoreMissingPath && !ApiFetchHelper.isPathExisting(responseData, extractJsonPath)) {
+                return;
+            }
             Object extractedValue = ApiFetchHelper.extractFromJson(responseData, extractJsonPath);
             if (extractedValue != null) {
                 AttributeType samlAttribute = new AttributeType(mappingModel.getName());
-                samlAttribute.addAttributeValue(extractedValue);
+                if (extractedValue instanceof List<?> values) {
+                    values.forEach(samlAttribute::addAttributeValue);
+                } else {
+                    samlAttribute.addAttributeValue(extractedValue);
+                }
                 ASTChoiceType attributeChoice = new ASTChoiceType(samlAttribute);
                 attributeStatement.addAttribute(attributeChoice);
             }

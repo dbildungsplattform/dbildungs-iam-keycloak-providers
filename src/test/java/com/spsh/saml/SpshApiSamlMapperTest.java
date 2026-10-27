@@ -17,6 +17,7 @@ import static org.mockito.Mockito.when;
 
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.List;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.AfterEach;
@@ -138,6 +139,28 @@ class SpshApiSamlMapperTest {
     }
 
     @ParameterizedTest
+    @ValueSource(strings = {"$.emailAdresse", "$.rollenart"})
+    void missingOptionalPathOmitsAttribute(String jsonPath) {
+        backend.setResponseBody("{}");
+        mapping.getConfig().put("extractJsonPath", jsonPath);
+        mapping.getConfig().put("ignoreMissingPath", "true");
+
+        map();
+
+        assertTrue(attributeStatement.getAttributes().isEmpty());
+    }
+
+    @Test
+    void optionalPathDoesNotSuppressBackendErrors() {
+        backend.setStatusCode(403);
+        mapping.getConfig().put("ignoreMissingPath", "true");
+
+        assertThrowsExactly(RuntimeException.class, this::map);
+
+        assertTrue(attributeStatement.getAttributes().isEmpty());
+    }
+
+    @ParameterizedTest
     @CsvSource({
         "$.personId, person-123",
         "$.vorname, Erika",
@@ -158,6 +181,18 @@ class SpshApiSamlMapperTest {
         assertEquals("externalData", attributeStatement.getAttributes().get(0).getAttribute().getName());
         assertEquals(expectedValue, attributeStatement.getAttributes().get(0)
             .getAttribute().getAttributeValue().get(0));
+    }
+
+    @Test
+    void departmentNumbersMapToSeparateAttributeValues() {
+        backend.setResponseBody("{\"dienststellenNummern\":[\"1234567\",\"7654321\"]}");
+        mapping.getConfig().put("extractJsonPath", "$.dienststellenNummern");
+        mapping.setName("schulkennung");
+
+        map();
+
+        assertEquals(List.of("1234567", "7654321"), attributeStatement.getAttributes().get(0)
+            .getAttribute().getAttributeValue());
     }
 
     @ParameterizedTest
