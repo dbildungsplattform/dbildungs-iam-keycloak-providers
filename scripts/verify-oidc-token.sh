@@ -7,7 +7,7 @@
 # manual, step-by-step version of what this script automates.
 #
 # Usage:
-#   ./scripts/verify-vidis-token.sh [options]
+#   ./scripts/verify-oidc-token.sh [options]
 #
 # Precedence for every setting: CLI flag > environment variable > default.
 #
@@ -17,52 +17,24 @@
 #   --client-id CLIENT_ID    (CLIENT_ID)       default: vidis-test
 #   --admin-user USER        (ADMIN_USER)      default: admin
 #   --admin-password PASS    (ADMIN_PASSWORD)  default: admin
-#   --test-username USER     (TEST_USERNAME)   default: smueller (seeded with the VIDIS test Angebot, ssuperadmin has none)
+#   --test-username USER     (TEST_USERNAME)   default: hschuster (Lehrkraft)
 #   --test-password PASS     (TEST_PASSWORD)   default: SPSHtest1!
 #   -h, --help               show this help and exit
 #
 # Example for a dev/feature deployment:
-#   ./scripts/verify-vidis-token.sh \
+#   ./scripts/verify-oidc-token.sh \
 #     --keycloak-url "https://<namespace>-keycloak.<dev-domain>" \
 #     --admin-password "<from 1Password>"
 
 set -euo pipefail
 
-# ---- 0. apply defaults for anything not already set in the environment ----
-: "${KEYCLOAK_URL:=http://localhost:8080}"
-: "${REALM:=SPSH}"
+VERIFY_PROTOCOL=oidc
+DEFAULT_CLIENT_ID=vidis-test
 : "${CLIENT_ID:=vidis-test}"
-: "${ADMIN_USER:=admin}"
-: "${ADMIN_PASSWORD:=admin}"
-: "${TEST_USERNAME:=hschuster}"
-: "${TEST_PASSWORD:=SPSHtest1!}"
-
-usage() {
-    sed -n '2,/^set -euo pipefail/p' "$0" | sed '$d; s/^# \{0,1\}//'
-}
-
-# ---- 0b. CLI flags override env vars/defaults ----
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --keycloak-url) KEYCLOAK_URL="$2"; shift 2 ;;
-        --realm) REALM="$2"; shift 2 ;;
-        --client-id) CLIENT_ID="$2"; shift 2 ;;
-        --admin-user) ADMIN_USER="$2"; shift 2 ;;
-        --admin-password) ADMIN_PASSWORD="$2"; shift 2 ;;
-        --test-username) TEST_USERNAME="$2"; shift 2 ;;
-        --test-password) TEST_PASSWORD="$2"; shift 2 ;;
-        -h|--help) usage; exit 0 ;;
-        *) echo "Unknown option: $1 (use --help for usage)" >&2; exit 1 ;;
-    esac
-done
-
-log() { printf '\n\033[1;34m==> %s\033[0m\n' "$1"; }
-die() { printf '\033[1;31mError: %s\033[0m\n' "$1" >&2; exit 1; }
-
-# ---- 1. prerequisites ----
-for bin in curl jq base64; do
-    command -v "$bin" >/dev/null 2>&1 || die "'$bin' is required but not installed."
-done
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/verify-common.sh"
+parse_options "$@"
+require_commands curl jq base64
 
 log "Using KEYCLOAK_URL=$KEYCLOAK_URL REALM=$REALM CLIENT_ID=$CLIENT_ID ADMIN_USER=$ADMIN_USER TEST_USERNAME=$TEST_USERNAME"
 
@@ -78,47 +50,34 @@ b64url_decode() {
     printf '%s' "$input" | base64 -d 2>/dev/null
 }
 
-# runs a curl call, aborts with a helpful message if the HTTP status is unexpected
-curl_json() {
-    local method="$1" url="$2" expected_status="$3"
-    shift 3
-    local response status body
-    response=$(curl -sS -o /tmp/vidis-verify-body.$$ -w '%{http_code}' -X "$method" "$url" "$@") || die "curl request to $url failed to execute."
-    status="$response"
-    body=$(cat /tmp/vidis-verify-body.$$)
-    rm -f /tmp/vidis-verify-body.$$
-    if [[ "$status" != "$expected_status" ]]; then
-        die "$method $url returned HTTP $status (expected $expected_status). Response: $body"
-    fi
-    printf '%s' "$body"
-}
-
 # ---- 2. get an admin token (master realm, admin-cli allows the password grant) ----
 log "Fetching admin token"
-ADMIN_TOKEN_RESPONSE=$(curl_json POST "$KEYCLOAK_URL/realms/master/protocol/openid-connect/token" 200 \
+ADMIN_TOKEN_RESPONSE=$(curl_response POST "$KEYCLOAK_URL/realms/master/protocol/openid-connect/token" 200 \
     -d grant_type=password -d client_id=admin-cli \
-    -d username="$ADMIN_USER" -d password="$ADMIN_PASSWORD")
+    --data-urlencode username="$ADMIN_USER" --data-urlencode password="$ADMIN_PASSWORD")
 ADMIN_TOKEN=$(echo "$ADMIN_TOKEN_RESPONSE" | jq -r '.access_token // empty')
 [[ -n "$ADMIN_TOKEN" ]] || die "Could not obtain an admin token. Check ADMIN_USER/ADMIN_PASSWORD/KEYCLOAK_URL. Response: $ADMIN_TOKEN_RESPONSE"
 
 # ---- 3. look up the client and its current directAccessGrantsEnabled state ----
 log "Looking up client '$CLIENT_ID' in realm '$REALM'"
-CLIENTS_RESPONSE=$(curl_json GET "$KEYCLOAK_URL/admin/realms/$REALM/clients?clientId=$CLIENT_ID" 200 \
-    -H "Authorization: Bearer $ADMIN_TOKEN")
+CLIENTS_RESPONSE=$(curl_response GET "$KEYCLOAK_URL/admin/realms/$REALM/clients" 200 \
+    --get --data-urlencode clientId="$CLIENT_ID" -H "Authorization: Bearer $ADMIN_TOKEN")
 CLIENT_UUID=$(echo "$CLIENTS_RESPONSE" | jq -r '.[0].id // empty')
 [[ -n "$CLIENT_UUID" ]] || die "Client '$CLIENT_ID' not found in realm '$REALM'. Check CLIENT_ID/REALM."
 
-CLIENT_JSON=$(curl_json GET "$KEYCLOAK_URL/admin/realms/$REALM/clients/$CLIENT_UUID" 200 \
+CLIENT_JSON=$(curl_response GET "$KEYCLOAK_URL/admin/realms/$REALM/clients/$CLIENT_UUID" 200 \
     -H "Authorization: Bearer $ADMIN_TOKEN")
+[[ "$(echo "$CLIENT_JSON" | jq -r '.protocol')" == "openid-connect" ]] || die "Client '$CLIENT_ID' is not an OIDC client. Use verify-saml-token.sh for SAML."
 ORIGINAL_DIRECT_GRANTS=$(echo "$CLIENT_JSON" | jq -r '.directAccessGrantsEnabled')
 
 # restore the client's original setting, even if a later step fails
 cleanup() {
     if [[ "$ORIGINAL_DIRECT_GRANTS" == "false" ]]; then
         log "Restoring directAccessGrantsEnabled=false on '$CLIENT_ID'"
-        curl -sS -o /dev/null -X PUT "$KEYCLOAK_URL/admin/realms/$REALM/clients/$CLIENT_UUID" \
+        curl_response PUT "$KEYCLOAK_URL/admin/realms/$REALM/clients/$CLIENT_UUID" 204 \
             -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
-            -d "$(echo "$CLIENT_JSON" | jq '.directAccessGrantsEnabled=false')" || true
+            -d '{"directAccessGrantsEnabled":false}' >/dev/null || \
+            printf 'WARNING: Could not restore directAccessGrantsEnabled=false on %s. Restore it manually.\n' "$CLIENT_ID" >&2
     fi
 }
 trap cleanup EXIT
@@ -128,23 +87,23 @@ if [[ "$ORIGINAL_DIRECT_GRANTS" == "true" ]]; then
     log "'$CLIENT_ID' already has directAccessGrantsEnabled=true, leaving it as-is"
 else
     log "Temporarily enabling directAccessGrantsEnabled on '$CLIENT_ID'"
-    curl_json PUT "$KEYCLOAK_URL/admin/realms/$REALM/clients/$CLIENT_UUID" 204 \
+    curl_response PUT "$KEYCLOAK_URL/admin/realms/$REALM/clients/$CLIENT_UUID" 204 \
         -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
-        -d "$(echo "$CLIENT_JSON" | jq '.directAccessGrantsEnabled=true')" >/dev/null
+        -d '{"directAccessGrantsEnabled":true}' >/dev/null
 fi
 
 # ---- 5. fetch the client secret ----
 log "Fetching client secret"
-SECRET_RESPONSE=$(curl_json GET "$KEYCLOAK_URL/admin/realms/$REALM/clients/$CLIENT_UUID/client-secret" 200 \
+SECRET_RESPONSE=$(curl_response GET "$KEYCLOAK_URL/admin/realms/$REALM/clients/$CLIENT_UUID/client-secret" 200 \
     -H "Authorization: Bearer $ADMIN_TOKEN")
-VIDIS_SECRET=$(echo "$SECRET_RESPONSE" | jq -r '.value // empty')
-[[ -n "$VIDIS_SECRET" ]] || die "Client '$CLIENT_ID' has no secret configured (is it a public client?)."
+CLIENT_SECRET=$(echo "$SECRET_RESPONSE" | jq -r '.value // empty')
+[[ -n "$CLIENT_SECRET" ]] || die "Client '$CLIENT_ID' has no secret configured (is it a public client?)."
 
 # ---- 6. get a token for the test user via the vidis-test client ----
 log "Requesting token for user '$TEST_USERNAME' via '$CLIENT_ID'"
-TOKEN_RESPONSE=$(curl_json POST "$KEYCLOAK_URL/realms/$REALM/protocol/openid-connect/token" 200 \
-    -d grant_type=password -d client_id="$CLIENT_ID" -d client_secret="$VIDIS_SECRET" \
-    -d username="$TEST_USERNAME" -d password="$TEST_PASSWORD")
+TOKEN_RESPONSE=$(curl_response POST "$KEYCLOAK_URL/realms/$REALM/protocol/openid-connect/token" 200 \
+    -d grant_type=password --data-urlencode client_id="$CLIENT_ID" --data-urlencode client_secret="$CLIENT_SECRET" \
+    --data-urlencode username="$TEST_USERNAME" --data-urlencode password="$TEST_PASSWORD")
 TOKEN=$(echo "$TOKEN_RESPONSE" | jq -r '.access_token // empty')
 [[ -n "$TOKEN" ]] || die "Could not obtain a user token. Check TEST_USERNAME/TEST_PASSWORD. Response: $TOKEN_RESPONSE"
 
