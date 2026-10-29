@@ -20,7 +20,10 @@ import org.keycloak.protocol.oidc.mappers.UserInfoTokenMapper;
 import org.keycloak.protocol.oidc.token.TokenInterceptorException;
 import org.keycloak.provider.ProviderConfigProperty;
 import org.keycloak.representations.IDToken;
+import org.keycloak.util.JsonSerialization;
+import org.keycloak.utils.JsonUtils;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.spsh.util.ApiFetchHelper;
 
 import jakarta.ws.rs.InternalServerErrorException;
@@ -35,6 +38,7 @@ public class SpshApiOidcMapper extends AbstractOIDCProtocolMapper implements OID
     public static final String IGNORE_MISSING_PATH = "ignoreMissingPath";
     public static final String KEYCLOAK_CLIENT_ID = "keycloakClientId";
     public static final String INCLUDE_EMAIL_ADDRESS = "includeEmailAddress";
+    public static final String OVERWRITE_EXISTING_CLAIM = "overwriteExistingClaim";
     private static final List<ProviderConfigProperty> configProperties = new ArrayList<>();
     private static final Logger LOGGER = Logger.getLogger(SpshApiOidcMapper.class);
 
@@ -83,6 +87,14 @@ public class SpshApiOidcMapper extends AbstractOIDCProtocolMapper implements OID
         includeEmailAddressProperty.setType(ProviderConfigProperty.BOOLEAN_TYPE);
         includeEmailAddressProperty.setHelpText("Whether to request the user's email address from the Backend.");
         configProperties.add(includeEmailAddressProperty);
+
+        ProviderConfigProperty overwriteExistingClaimProperty = new ProviderConfigProperty();
+        overwriteExistingClaimProperty.setName(OVERWRITE_EXISTING_CLAIM);
+        overwriteExistingClaimProperty.setLabel("SPSH Override Existing Claim");
+        overwriteExistingClaimProperty.setType(ProviderConfigProperty.BOOLEAN_TYPE);
+        overwriteExistingClaimProperty.setDefaultValue("true");
+        overwriteExistingClaimProperty.setHelpText("Whether the SPSH value replaces an existing claim. If disabled, an existing value is preserved; missing claims are still populated.");
+        configProperties.add(overwriteExistingClaimProperty);
     }
 
     @Override
@@ -111,6 +123,11 @@ public class SpshApiOidcMapper extends AbstractOIDCProtocolMapper implements OID
     }
 
     @Override
+    public int getPriority() {
+        return 1;
+    }
+
+    @Override
     public void validateConfig(KeycloakSession session, RealmModel realm, ProtocolMapperContainerModel client, ProtocolMapperModel mapperModel)
         throws ProtocolMapperConfigException {
         String keycloakClientId = mapperModel.getConfig().get(KEYCLOAK_CLIENT_ID);
@@ -129,6 +146,7 @@ public class SpshApiOidcMapper extends AbstractOIDCProtocolMapper implements OID
         String extractJsonPath = mappingModel.getConfig().get(EXTRACT_JSON_PATH);
         boolean ignoreMissingPath = Boolean.parseBoolean(mappingModel.getConfig().getOrDefault(IGNORE_MISSING_PATH, "false"));
         boolean includeEmailAddress = Boolean.parseBoolean(mappingModel.getConfig().getOrDefault(INCLUDE_EMAIL_ADDRESS, "false"));
+        boolean overwriteExistingClaim = Boolean.parseBoolean(mappingModel.getConfig().getOrDefault(OVERWRITE_EXISTING_CLAIM, "true"));
         String keycloakClientId = resolveKeycloakClientId(
             mappingModel.getConfig().get(KEYCLOAK_CLIENT_ID), clientSessionCtx.getClientSession().getClient().getClientId());
         String userSub = userSession.getUser().getId();
@@ -164,7 +182,8 @@ public class SpshApiOidcMapper extends AbstractOIDCProtocolMapper implements OID
                 throw new InternalServerErrorException(String.format("JSON Path %s does not exist in response: %s", extractJsonPath, responseData));
             }
             Object extractedValue = ApiFetchHelper.extractFromJson(responseData, extractJsonPath);
-            if (extractedValue != null) {
+            if (extractedValue != null && (overwriteExistingClaim
+                || !hasClaim(token, mappingModel.getConfig().get(OIDCAttributeMapperHelper.TOKEN_CLAIM_NAME)))) {
                 OIDCAttributeMapperHelper.mapClaim(token, mappingModel, extractedValue);
             }
         } catch (Exception e) {
@@ -176,6 +195,20 @@ public class SpshApiOidcMapper extends AbstractOIDCProtocolMapper implements OID
             throw exception;
         }
 
+    }
+
+    private static boolean hasClaim(IDToken token, String claimName) {
+        if (claimName == null) {
+            return false;
+        }
+        JsonNode value = JsonSerialization.mapper.valueToTree(token);
+        for (String segment : JsonUtils.splitClaimPath(claimName)) {
+            value = value.get(segment);
+            if (value == null || value.isNull()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static String resolveKeycloakClientId(String configuredKeycloakClientId, String defaultKeycloakClientId) {

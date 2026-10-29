@@ -16,6 +16,7 @@ import static org.mockito.Mockito.when;
 import java.io.IOException;
 import java.net.URI;
 import java.util.HashMap;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Stream;
 
@@ -46,13 +47,16 @@ import org.keycloak.protocol.oidc.OIDCProviderConfig;
 import org.keycloak.protocol.oidc.TokenManager;
 import org.keycloak.protocol.oidc.endpoints.TokenEndpoint;
 import org.keycloak.protocol.oidc.grants.OAuth2GrantType;
+import org.keycloak.protocol.oidc.mappers.UserPropertyMapper;
 import org.keycloak.protocol.oidc.token.TokenInterceptorException;
 import org.keycloak.protocol.oidc.utils.AuthorizeClientUtil;
 import org.keycloak.representations.AccessToken;
+import org.keycloak.representations.IDToken;
 import org.keycloak.representations.idm.OAuth2ErrorRepresentation;
 import org.keycloak.services.CorsErrorResponseException;
 import org.keycloak.services.cors.Cors;
 import org.keycloak.services.util.DPoPUtil;
+import org.keycloak.util.JsonSerialization;
 import org.mockito.MockedStatic;
 
 import com.spsh.utils.SpshBackendMock;
@@ -118,6 +122,8 @@ class SpshApiOidcMapperTest {
     void backendHttpErrorsAbortMapping(int responseStatus) {
         backend.setStatusCode(responseStatus);
         mapping.getConfig().put("ignoreMissingPath", "true");
+        mapping.getConfig().put(SpshApiOidcMapper.OVERWRITE_EXISTING_CLAIM, "false");
+        accessToken.setOtherClaims("personId", "existing-person");
 
         TokenInterceptorException exception = assertThrows(TokenInterceptorException.class, this::map);
 
@@ -125,7 +131,7 @@ class SpshApiOidcMapperTest {
         assertEquals("Failed to fetch or process SPSH API data for OIDC token", exception.getDescription());
         assertInstanceOf(IOException.class, exception.getCause());
         assertEquals("Unexpected response status: " + responseStatus, exception.getCause().getMessage());
-        assertTrue(accessToken.getOtherClaims().isEmpty());
+        assertEquals("existing-person", accessToken.getOtherClaims().get("personId"));
     }
 
     @Test
@@ -175,6 +181,112 @@ class SpshApiOidcMapperTest {
         map();
 
         assertEquals(expectedValue, accessToken.getOtherClaims().get("externalData"));
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "true, access, true, person-123", "false, access, true, person-123",
+        "true, id, true, person-123", "false, id, true, person-123",
+        "true, userinfo, true, person-123", "false, userinfo, true, person-123",
+        "true, access, false, erika.mustermann", "false, access, false, erika.mustermann",
+        "true, id, false, erika.mustermann", "false, id, false, erika.mustermann",
+        "true, userinfo, false, erika.mustermann", "false, userinfo, false, erika.mustermann"
+    })
+    void preferredUsernameRespectsOverwriteSetting(boolean customMapperFirst, String tokenType,
+        boolean overwriteExistingClaim, String expectedUsername) {
+        mapping.getConfig().put("claim.name", "preferred_username");
+        mapping.getConfig().put(SpshApiOidcMapper.OVERWRITE_EXISTING_CLAIM, Boolean.toString(overwriteExistingClaim));
+        mapping.getConfig().put("id.token.claim", "true");
+        mapping.getConfig().put("userinfo.token.claim", "true");
+        when(userSession.getUser().getUsername()).thenReturn("erika.mustermann");
+        UserPropertyMapper usernameMapper = new UserPropertyMapper();
+        ProtocolMapperModel usernameMapping = new ProtocolMapperModel();
+        usernameMapping.setName("username");
+        usernameMapping.setProtocolMapper(usernameMapper.getId());
+        usernameMapping.setConfig(new HashMap<>());
+        usernameMapping.getConfig().put("user.attribute", "username");
+        usernameMapping.getConfig().put("claim.name", "preferred_username");
+        usernameMapping.getConfig().put("access.token.claim", "true");
+        usernameMapping.getConfig().put("id.token.claim", "true");
+        usernameMapping.getConfig().put("userinfo.token.claim", "true");
+        when(session.getKeycloakSessionFactory().getProviderFactory(ProtocolMapper.class, usernameMapper.getId()))
+            .thenReturn(usernameMapper);
+        when(clientSessionContext.getProtocolMappersStream()).thenAnswer(invocation -> customMapperFirst
+            ? Stream.of(mapping, usernameMapping) : Stream.of(usernameMapping, mapping));
+
+        TokenManager tokenManager = new TokenManager();
+        IDToken token = switch (tokenType) {
+            case "access" -> tokenManager.transformAccessToken(session, accessToken, userSession, clientSessionContext);
+            case "id" -> tokenManager.transformIDToken(session, new IDToken(), userSession, clientSessionContext);
+            case "userinfo" -> tokenManager.transformUserInfoAccessToken(session, accessToken, userSession, clientSessionContext);
+            default -> throw new IllegalArgumentException("Unexpected token type: " + tokenType);
+        };
+
+        assertEquals(expectedUsername, JsonSerialization.mapper.valueToTree(token).get("preferred_username").asText());
+    }
+
+    @Test
+    void overwriteOptionIsEnabledByDefault() {
+        var property = new SpshApiOidcMapper().getConfigProperties().stream()
+            .filter(config -> SpshApiOidcMapper.OVERWRITE_EXISTING_CLAIM.equals(config.getName()))
+            .findFirst().orElseThrow();
+
+        assertEquals("true", property.getDefaultValue());
+    }
+
+    @Test
+    void existingClaimIsOverwrittenWhenOptionIsAbsent() {
+        accessToken.setOtherClaims("personId", "existing-person");
+
+        map();
+
+        assertEquals("person-123", accessToken.getOtherClaims().get("personId"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void missingClaimIsPopulatedWhenOverwriteDisabled(boolean addNullClaim) {
+        mapping.getConfig().put(SpshApiOidcMapper.OVERWRITE_EXISTING_CLAIM, "false");
+        if (addNullClaim) {
+            accessToken.setOtherClaims("personId", null);
+        }
+
+        map();
+
+        assertEquals("person-123", accessToken.getOtherClaims().get("personId"));
+    }
+
+    @Test
+    void existingStandardClaimIsPreservedWhenOverwriteDisabled() {
+        mapping.getConfig().put(SpshApiOidcMapper.OVERWRITE_EXISTING_CLAIM, "false");
+        mapping.getConfig().put("claim.name", "given_name");
+        accessToken.setGivenName("Existing");
+
+        map();
+
+        assertEquals("Existing", JsonSerialization.mapper.valueToTree(accessToken).get("given_name").asText());
+    }
+
+    @Test
+    void existingNestedClaimIsPreservedWhenOverwriteDisabled() {
+        mapping.getConfig().put(SpshApiOidcMapper.OVERWRITE_EXISTING_CLAIM, "false");
+        mapping.getConfig().put("claim.name", "profile.username");
+        accessToken.setOtherClaims("profile", Map.of("username", "existing-person"));
+
+        map();
+
+        assertEquals(Map.of("username", "existing-person"), accessToken.getOtherClaims().get("profile"));
+    }
+
+    @Test
+    void existingEscapedClaimIsPreservedWhenOverwriteDisabled() {
+        mapping.getConfig().put(SpshApiOidcMapper.OVERWRITE_EXISTING_CLAIM, "false");
+        mapping.getConfig().put("claim.name", "profile\\.username");
+        accessToken.setOtherClaims("profile.username", "existing-person");
+
+        map();
+
+        assertEquals("existing-person", accessToken.getOtherClaims().get("profile.username"));
     }
 
     @Test
