@@ -2,13 +2,72 @@
 
 This repository is designed for creating custom **providers** for our **dbildungs-iam-keycloak** instance. It serves as the foundation for extending Keycloak's functionality to meet our specific requirements, such as custom protocol mappers, event listeners, and other extensions.
 
+## Mapper failure handling
+
+Backend HTTP errors (all non-2xx responses), connection failures and response processing exceptions abort mapping. Both mappers throw the shared `com.spsh.util.TokenInterceptorException` and retain the original cause. The error message identifies the affected protocol: `Failed to fetch or process SPSH API data for OIDC token` or `Failed to fetch or process SPSH API data for SAML assertion`. `TokenInterceptorException` is a custom runtime exception.
+
+Behavior covered by the mapper tests:
+
+- OIDC: `TokenManager.createClientAccessToken` propagates mapper exceptions. `AccessTokenResponseBuilder.generateAccessToken()` therefore aborts before the response is built or the token is signed.
+- SAML: `SamlProtocol.authenticated` catches the mapper exception and returns `ErrorPage.error` with `BAD_REQUEST` instead of building the authenticated SAML response.
+- `ignoreMissingPath=true` still allows an absent optional JSON path in a successful OIDC response; it does not suppress backend errors. Existing handling of missing mapper configuration is unchanged.
+- SAML also supports `ignoreMissingPath=true` for optional V2 fields. JSON arrays are mapped to separate SAML `AttributeValue` elements.
+
+## Running Tests
+
+Run tests from the repository root. These commands do not create a provider JAR:
+
+```bash
+mvn test
+mvn -Dtest=SpshApiOidcMapperTest test
+mvn -Dtest=SpshApiSamlMapperTest test
+```
+
+With JDK 26, append `-DargLine=-Dnet.bytebuddy.experimental=true` to any of the commands above, for example:
+
+```bash
+mvn test -DargLine=-Dnet.bytebuddy.experimental=true
+```
+
+Test reports are written to `target/surefire-reports/`.
+
+The verification scripts have dependency-free Python tests with a local HTTP stub:
+Its start the integration tests.
+```bash
+python3 -B -m unittest discover -s scripts -p 'test_verify_scripts.py' -v
+```
+
+## Building the Provider
+
+Always use the Keycloak version from the [dbildungs-iam-keycloak Dockerfile on GitHub](https://github.com/dbildungsplattform/dbildungs-iam-keycloak/blob/main/Dockerfile) as the source of truth. Keep `keycloak.version` in `pom.xml` aligned with that image's Keycloak product version before building or testing. An image revision suffix is not part of the Keycloak product version and must not be included in the Maven dependency version.
+
+Build the provider JAR from the repository root:
+
+```bash
+mvn clean package
+```
+
+The bundled JAR is written to `target/keycloak-providers-1.8.jar`.
+
+To also run the Maven verification phase, use:
+
+```bash
+mvn clean verify
+```
+
+Both build commands execute tests by default. The JDK 26 compatibility argument also applies to builds:
+
+```bash
+mvn clean package -DargLine=-Dnet.bytebuddy.experimental=true
+```
+
 ## Local Setup
 
 Prerequisite: [Maven](https://maven.apache.org/) (e.g. via `brew install maven`) and Docker.
 
 To test local changes to the providers in a Keycloak instance started via `dbildungs-iam-server/compose.yaml`:
 
-1. Build the provider JAR:
+1. Build the provider JAR (see [Building the Provider](#building-the-provider) for the JDK 26 compatibility argument):
     ```bash
     mvn clean package
     ```
@@ -37,11 +96,11 @@ To test local changes to the providers in a Keycloak instance started via `dbild
 
 The admin console is then available at [http://localhost:8080/admin/master/console/](http://localhost:8080/admin/master/console/) (login `admin`/`admin`).
 
-To verify the providers, you can use the `vidis-test` client (Keycloak client "VIDIS-Testumgebung") — it is already preconfigured with the 6 mappers (`rolle`, `schulkennung`, `vorname`, `email`, `nachname`, `uid`) of type `spsh-custom-oidc-api-mapper` and already uses the V2 solution (`keycloakClientId`/`includeEmailAddress`), see `dbildungs-iam-server/config/dev-realm-spsh.json`.
+To verify the providers, use the `vidis-test` OIDC client or the `saml-test` SAML client. Both have six V2 API mappers (`rolle`, `schulkennung`, `vorname`, `email`, `nachname`, `uid`), configured in the [development realm](../dbildungs-iam-keycloak/charts/dbildungs-iam-keycloak/dev-realm-spsh.json). Each mapper uses the current session's client ID and requests email data. The development `Lehrkraft` role grants access to both clients; `hschuster` is a seeded user with that role.
 
 ## Deploying to dev / staging / production
 
-This repository has no CI/CD of its own. The JAR you build locally (step 1 above) is target-agnostic — it's just a plain Java artifact, unrelated to any Docker `--target`. Once it's committed into `dbildungs-iam-keycloak/src/providers/`, it is picked up by **every** image build of that repository, because the `Dockerfile` copies `src/providers/` in its shared `base` stage, which both the `development` (local, `build-dev.sh`) and `deployment` (staging/production, built by CI) stages are derived from. So there is no separate build step needed for staging/production — the same JAR you already tested locally is exactly what ships everywhere.
+This repository runs automated tests in CI but does not publish or deploy provider artifacts. The JAR you build locally (step 1 above) is target-agnostic — it's just a plain Java artifact, unrelated to any Docker `--target`. Once it's committed into `dbildungs-iam-keycloak/src/providers/`, it is picked up by **every** image build of that repository, because the `Dockerfile` copies `src/providers/` in its shared `base` stage, which both the `development` (local, `build-dev.sh`) and `deployment` (staging/production, built by CI) stages are derived from. So there is no separate build step needed for staging/production — the same JAR you already tested locally is exactly what ships everywhere.
 
 Steps to actually get a change live:
 
@@ -57,16 +116,16 @@ Steps to actually get a change live:
 
 The `vidis-test` client has `directAccessGrantsEnabled: false` by default, so it doesn't support the OAuth2 password grant out of the box. To still pull a real access token via curl (e.g. to check whether the custom claims from the providers actually show up), temporarily flip that setting through the Admin REST API, request a token, then revert it. This works the same way locally and against a dev/feature deployment — only `KEYCLOAK_URL` and the admin credentials differ (see the internal deployment docs for the actual dev/feature Keycloak URL).
 
-A ready-to-use script that automates all of the steps below (plus sanity checks and error handling) is checked in at [`scripts/verify-vidis-token.sh`](./scripts/verify-vidis-token.sh):
+A ready-to-use script that automates all of the steps below (plus sanity checks and error handling) is checked in at [`scripts/verify-oidc-token.sh`](./scripts/verify-oidc-token.sh):
 
 ```bash
-./scripts/verify-vidis-token.sh
+./scripts/verify-oidc-token.sh
 ```
 
 It picks up `KEYCLOAK_URL`, `REALM`, `CLIENT_ID`, `ADMIN_USER`, `ADMIN_PASSWORD`, `TEST_USERNAME` and `TEST_PASSWORD` from your shell environment if already exported, and otherwise falls back to the same local-dev defaults used below — so it works unchanged for a dev/feature deployment too, e.g.:
 
 ```bash
-KEYCLOAK_URL="https://<namespace>-keycloak.<dev-domain>" ADMIN_PASSWORD="<from 1Password>" ./scripts/verify-vidis-token.sh
+KEYCLOAK_URL="https://<namespace>-keycloak.<dev-domain>" ADMIN_PASSWORD="<from 1Password>" ./scripts/verify-oidc-token.sh
 ```
 
 The manual, step-by-step version of what the script does:
@@ -76,8 +135,8 @@ KEYCLOAK_URL="http://localhost:8080"     # dev/feature: use the Keycloak URL of 
 REALM="SPSH"
 ADMIN_USER="admin"
 ADMIN_PASSWORD="admin"                    # local; for dev/feature take this from the cluster's 1Password vault
-TEST_USERNAME="smueller"                  # seeded with the VIDIS test Angebot; e.g. ssuperadmin has none
-TEST_PASSWORD="SPSHtest1!"
+TEST_USERNAME="hschuster"                 # seeded Lehrkraft with access to vidis-test (OIDC) and saml-test (SAML) clients
+TEST_PASSWORD=<PW>
 
 # 1. Get an admin token (master realm, admin-cli allows the password grant)
 ADMIN_TOKEN=$(curl -s -X POST "$KEYCLOAK_URL/realms/master/protocol/openid-connect/token" \
@@ -108,6 +167,24 @@ echo "$TOKEN" | cut -d. -f2 | base64 -d 2>/dev/null | jq
 ```
 
 Afterwards, repeat step 2 with `directAccessGrantsEnabled=false` to restore the client's original configuration.
+
+## Verifying a SAML assertion (local & dev/feature deployment)
+
+[`scripts/verify-saml-token.sh`](./scripts/verify-saml-token.sh) tests the V2 SAML mappers for `saml-test` and prints the attributes as JSON. Requires `curl`, Python 3, the deployed provider and a configured test client with seeded access (`Lehrkraft`). No admin credentials are needed.
+
+Run from this repository's root:
+
+```bash
+./scripts/verify-saml-token.sh
+
+./scripts/verify-saml-token.sh \
+  --keycloak-url "https://<namespace>-keycloak.<dev-domain>" \
+  --test-username hschuster
+```
+
+Override the password with `TEST_PASSWORD` or `--test-password`. CLI flags override environment variables and defaults; `--help` lists all options.
+
+The script checks assertion issuance and mapped values, not XML signatures.
 
 #### Finding `directAccessGrantsEnabled` in the Admin UI
 
