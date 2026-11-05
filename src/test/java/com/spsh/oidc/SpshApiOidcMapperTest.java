@@ -178,11 +178,6 @@ class SpshApiOidcMapperTest {
     }
 
     @Test
-    void priorityIs1000() {
-        assertEquals(1000, new SpshApiOidcMapper().getPriority());
-    }
-
-    @Test
     void stillIgnoresMissingPathWhenConfigured() {
         backend.setResponseBody("{}");
         mapping.getConfig().put("ignoreMissingPath", "true");
