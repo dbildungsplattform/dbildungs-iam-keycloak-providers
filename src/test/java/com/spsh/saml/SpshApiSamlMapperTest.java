@@ -97,6 +97,11 @@ class SpshApiSamlMapperTest {
         }
     }
 
+    @Test
+    void priorityIs1000() {
+        assertEquals(1000, new SpshApiSamlMapper().getPriority());
+    }
+
     @ParameterizedTest
     @ValueSource(ints = {400, 401, 403, 404, 429, 500, 502, 503})
     void backendHttpErrorsAbortMapping(int responseStatus) {
@@ -258,4 +263,3 @@ class SpshApiSamlMapperTest {
         return authenticationSession;
     }
 }
-

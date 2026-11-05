@@ -95,6 +95,11 @@ public class SpshApiSamlMapper extends AbstractSAMLProtocolMapper implements SAM
     }
 
     @Override
+    public int getPriority() {
+        return 1000;
+    }
+
+    @Override
     public void validateConfig(KeycloakSession session, RealmModel realm, ProtocolMapperContainerModel client, ProtocolMapperModel mapperModel)
         throws ProtocolMapperConfigException {
         String keycloakClientId = mapperModel.getConfig().get(KEYCLOAK_CLIENT_ID);
