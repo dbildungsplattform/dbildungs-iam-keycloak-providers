@@ -258,4 +258,3 @@ class SpshApiSamlMapperTest {
         return authenticationSession;
     }
 }
-

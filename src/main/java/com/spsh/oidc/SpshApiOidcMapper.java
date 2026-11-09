@@ -83,6 +83,7 @@ public class SpshApiOidcMapper extends AbstractOIDCProtocolMapper implements OID
         includeEmailAddressProperty.setType(ProviderConfigProperty.BOOLEAN_TYPE);
         includeEmailAddressProperty.setHelpText("Whether to request the user's email address from the Backend.");
         configProperties.add(includeEmailAddressProperty);
+
     }
 
     @Override
@@ -108,6 +109,11 @@ public class SpshApiOidcMapper extends AbstractOIDCProtocolMapper implements OID
     @Override
     public String getId() {
         return PROVIDER_ID;
+    }
+
+    @Override
+    public int getPriority() {
+        return 1000;
     }
 
     @Override
@@ -177,7 +183,6 @@ public class SpshApiOidcMapper extends AbstractOIDCProtocolMapper implements OID
         }
 
     }
-
     private static String resolveKeycloakClientId(String configuredKeycloakClientId, String defaultKeycloakClientId) {
         return (configuredKeycloakClientId == null || configuredKeycloakClientId.isEmpty())
             ? defaultKeycloakClientId : configuredKeycloakClientId;
